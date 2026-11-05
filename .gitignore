@@ -1,0 +1,19 @@
+data/
+verdicts_audit.jsonl
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+.idea/
+eval/reports/
+
+# docs: only README.md is tracked
+*.md
+!README.md
+
+# zip files anywhere in the repo (the dataset is never committed)
+*.zip

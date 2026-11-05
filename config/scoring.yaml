@@ -1,0 +1,119 @@
+# Scoring config. Code reads this; code does not hard-code weights. See PLAN.md section 4.
+runtime:
+  max_concurrency: 8        # overridable via TRIAGE_MAX_CONCURRENCY / CLI
+
+weights:
+  business_criticality: 0.28
+  blast_radius: 0.22
+  historical_action_rate: 0.20
+  anomaly_severity: 0.17
+  monitor_signal_quality: 0.08
+  recency_pressure: 0.05
+  context_signal: 0.10          # LLM-extracted free-text features (stated noise / recurrence / impact); optional axis
+
+thresholds:
+  HIGH: 0.65
+  MEDIUM: 0.35
+
+min_axes_weight: 0.5        # present-weight share below this -> tier capped MEDIUM, confidence low
+
+overrides:
+  paused_monitor:
+    action: downgrade_one_tier
+    confidence_penalty: medium
+  pii_boost: 0.08
+  missing_criticality:
+    confidence_penalty: medium     # axis value itself: axes.business_criticality.missing_value
+  no_signal_tier: MEDIUM           # no axis has a value / alert failed processing: human looks (status/gaps flag it)
+
+confidence:                        # n = axes that are unknown (None) or low-support
+  medium_at: 1                     # n >= 1 -> confidence_support medium
+  low_at: 2                        # n >= 2 -> low
+  cannot_tell_max_axes: 1          # final tier LOW and <= this many axes with real data (not unknown, not low-support) -> "I can't tell from this data"
+
+evidence:
+  max_events_cited: 3                  # events listed as citations per alert
+
+llm:
+  base_url_env: LLM_BASE_URL
+  api_key_env: LLM_API_KEY
+  model_env: LLM_MODEL
+  temperature: 0
+  max_attempts: 3              # tenacity: tries per model call on transport errors (timeouts, 5xx, connection)
+  backoff_initial_seconds: 1.0
+  backoff_max_seconds: 20.0
+  backoff_jitter_seconds: 1.0
+  max_feedback_retries: 1      # re-asks after a schema/guardrail rejection, then the axis is left unknown
+  max_text_chars: 1000         # cap on each untrusted free-text field (title/description/notes) sent to the LLM
+  timeout_seconds: 60
+
+summary:                     # second LLM call: writes the short explanation from the finished verdict's facts
+  model_env: LLM_SUMMARY_MODEL       # env var naming the summary model (reuses the LLM_* URL/key and the llm.* retry settings)
+  default_model: gpt-4.1             # used when LLM_SUMMARY_MODEL is unset
+  max_facts_chars: 6000              # cap on the facts block sent to the model
+
+history:
+  laplace_alpha: 1                       # smoothing: (acted+a)/(labeled+2a)
+  acted_statuses: [fixed, acknowledged]
+  not_acted_statuses: [no action needed, false positive, expected]
+  excluded_alert_types: [rule_run_execution_error]   # monitor plumbing, not a data signal
+  # alerts.alert_type -> alert_history.alert_type (taxonomies differ; derived by monitor_id join, PLAN section 2.7)
+  type_map:
+    custom_sql: [custom_rule_anomalies]
+    validation: [custom_rule_anomalies]
+    agent validation: [custom_rule_anomalies]
+    agent trajectory: [custom_rule_anomalies]
+    metric: [metric_anomalies]
+    freshness: [anomalies, schema_changes]
+    schema_change: [anomalies, schema_changes]
+    volume: [anomalies]
+
+# Axis parameters (PLAN section 4). Every scale/cap/mapping is tunable here; all axis values are in [0, 1].
+axes:
+  business_criticality:
+    component_weights: {importance: 0.4, level: 0.3, usage: 0.3}   # renormalised over components present
+    level_values: {high: 1.0, medium: 0.6, low: 0.2}               # table_criticality.criticality (lower-cased)
+    usage_caps: {reads_30d: 10000, writes_30d: 2000, active_users_30d: 20}  # log-scaled: log1p(x)/log1p(cap)
+    missing_value: 0.5                                             # neutral mid when NO alert table has a criticality row (low confidence)
+    golden_bonus: 0.1                                              # added when is_golden is true; PII handled by overrides.pii_boost
+  blast_radius:
+    downstream_tables_cap: 2000     # log-scaled; per-alert counts are bimodal (0-3 / ~350 / ~2000)
+    bi_reports_cap: 50
+    tables_share: 0.5               # share of downstream-table score vs BI-report score
+  historical_action_rate:
+    cold_start_weight_factor: 0.5   # monitor has no labels -> use alert-type pool prior at reduced weight
+    n_labeled_min: 5                # fewer labeled rows than this -> weight shrunk (low support)
+    low_support_weight_factor: 0.5
+  anomaly_severity:
+    # ASSUMPTION (unvalidated): for 'breach' rules the allowed limit is upper_threshold if present, else lower_threshold;
+    # excess = max(actual - limit, 0). The data does not say which side is the limit for custom_rule/validation events.
+    event_rules:                    # event_type -> rule (band | breach | schema | none)
+      metric_anomaly: band
+      row_count_anomaly: band
+      validation_breach: breach
+      custom_rule_breach: breach
+      schema_change: schema
+      freshness_anomaly: none
+      unchanged_size_anomaly: none
+      agent_validation_anomaly: none
+      agent_trajectory_anomaly: none
+    band_multiple_cap: 2.0          # distance outside band, in band widths, that maps to 1.0
+    breach_excess_cap: 1000         # log-scaled rows over threshold that maps to 1.0
+    schema_weights: {fields_added: 0.3, fields_removed: 1.0, field_type_changes: 1.0}
+    schema_cap: 4.0                 # weighted change count that maps to 1.0
+    breach_floor: 0.3               # a breach/band event never scores below this (distance 0 still means the rule fired)
+    no_magnitude_value: 0.5         # constant mid for rules with no numeric magnitude (low confidence)
+    extra_event_bump: 0.02          # per additional event in the alert
+    max_event_bump: 0.2
+  monitor_signal_quality:
+    # ASSUMPTION (unverifiable from data): lower sensitivity => fewer, larger-deviation alerts => more credible.
+    sensitivity_values: {low: 0.7, medium: 0.5, high: 0.3}
+    priority_values: {p1: 1.0, p2: 0.75, p3: 0.5, p4: 0.25, p5: 0.0}  # inner-config priority only
+  recency_pressure:
+    window_hours: 24
+    base_value: 0.5
+    cluster_value: 1.0              # same monitor fired >=2 times within window_hours
+  context_signal:                   # mean of the features the LLM found stated (with a verbatim quote) in free text
+    noise_values: {expected_or_known: 0.1, retired_or_draft: 0.0, historical_backlog: 0.2}
+    recurrence_values: {first: 0.4, repeated: 0.8}
+    impact_values: {low: 0.2, medium: 0.5, high: 0.9}
