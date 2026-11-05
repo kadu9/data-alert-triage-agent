@@ -25,7 +25,7 @@ It does not guess: a missing value is listed as a data gap and lowers confidence
 
 ```bash
 # 1. Clone and enter
-git clone <repo-url> data-alert-triage-agent && cd data-alert-triage-agent
+git clone https://github.com/kadu9/data-alert-triage-agent.git && cd data-alert-triage-agent
 
 # 2. Install locked dependencies
 uv sync --locked
