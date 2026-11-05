@@ -449,6 +449,7 @@ The "golden dataset" here is the 83 labeled history rows used as a check set. It
 - Expose scoring through an API (a thin wrapper over `triage.service`) so users can set weights, thresholds and overrides per request or per tenant, validated by the same `ScoringConfig` model, instead of editing `config/scoring.yaml`.
 - Review `monitor_signal_quality`: its golden AUC is 0.330 (below chance), so the "lower sensitivity is more credible" assumption points the wrong way on this sample. Re-test the direction or lower the weight.
 - Benchmark all seven axes and the final tiers (precision/recall) on labeled history, then tune weights and thresholds. Needs more than the 83 labels from 18 monitors.
+- more in depth data analysis given more data to tune scoring knobs
 
 
 **Regression safety**
