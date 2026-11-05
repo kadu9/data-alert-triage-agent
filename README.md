@@ -449,7 +449,7 @@ The "golden dataset" here is the 83 labeled history rows used as a check set. It
 - Expose scoring through an API (a thin wrapper over `triage.service`) so users can set weights, thresholds and overrides per request or per tenant, validated by the same `ScoringConfig` model, instead of editing `config/scoring.yaml`.
 - Review `monitor_signal_quality`: its golden AUC is 0.330 (below chance), so the "lower sensitivity is more credible" assumption points the wrong way on this sample. Re-test the direction or lower the weight.
 - Benchmark all seven axes and the final tiers (precision/recall) on labeled history, then tune weights and thresholds. Needs more than the 83 labels from 18 monitors.
-- Capture analyst outcomes for live verdicts (all 46 live alerts are `not_acknowledged`) so labels exist for the live alert types.
+
 
 **Regression safety**
 - Add a baseline of the deterministic axes and tiers of the 46 live alerts (`TriageService.triage_deterministic`, no LLM) and diff it after every change. The golden check stores its inputs, so it does not notice a change in `loader`, `ContextIndex` or `HistoryIndex`.
@@ -463,9 +463,11 @@ The "golden dataset" here is the 83 labeled history rows used as a check set. It
 
 **Engineering**
 - JSON/OpenTelemetry-compatible logging (trace ids, token and latency metrics).
-- Load the input file names from config instead of `zipio.py`/`loader.py`.
-- Stream verdicts as each alert finishes (constant memory, resume from partial output).
-- Use `bisect` for peer alert times instead of filtering per alert; cache `HistoryIndex.pool_stats` per alert type.
+- For large files that wont fit in memory , use chunking for e.g
+- Expose this as an api, containerization, stateless (if possible) scalable service
+- Data Persistence of triaged alerts
+- Rate limiting, authentication, Authorization for service
+  
 
 ---
 
